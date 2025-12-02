@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Neon Heads 3D - Optimized</title>
+    <style>
+      /* --- CSS: UI & Layout --- */
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+        font-family: "Segoe UI", sans-serif;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #game-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #ui-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      #score-display {
+        margin-top: 30px;
+        font-size: 48px;
+        font-weight: 900;
+        color: #fff;
+        text-shadow: 0 0 10px currentColor, 2px 2px 0 #000;
+        letter-spacing: 2px;
+        z-index: 10;
+      }
+
+      .panel {
+        pointer-events: auto;
+        background: rgba(16, 20, 30, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 2rem;
+        border-radius: 20px;
+        text-align: center;
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+        position: absolute;
+        top: 30%;
+        transform: translateY(-50%);
+        max-width: 90%;
+        z-index: 20;
+      }
+      .hidden {
+        display: none !important;
+      }
+      h1 {
+        margin: 0 0 10px 0;
+        text-transform: uppercase;
+        font-size: 1.8rem;
+        letter-spacing: 2px;
+      }
+      p {
+        color: #ccc;
+        font-size: 1rem;
+        margin-bottom: 20px;
+      }
+
+      button {
+        background: linear-gradient(45deg, #444, #888);
+        color: #fff;
+        border: none;
+        padding: 12px 40px;
+        font-size: 1.1rem;
+        font-weight: bold;
+        cursor: pointer;
+        border-radius: 50px;
+        text-transform: uppercase;
+        transition: transform 0.2s;
+      }
+      button:active {
+        transform: scale(0.95);
+      }
+
+      .level-select {
+        margin-bottom: 15px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 5px;
+      }
+      .level-btn {
+        background: transparent;
+        border: 1px solid #fff;
+        padding: 5px 10px;
+        cursor: pointer;
+        color: #fff;
+        border-radius: 5px;
+        opacity: 0.5;
+        font-size: 0.9rem;
+      }
+      .level-btn.active {
+        opacity: 1;
+        background: rgba(255, 255, 255, 0.2);
+        font-weight: bold;
+      }
+
+      #mobile-controls {
+        position: absolute;
+        bottom: 20px;
+        left: 0;
+        width: 100%;
+        height: 120px;
+        display: flex;
+        justify-content: space-between;
+        padding: 0 20px;
+        box-sizing: border-box;
+        pointer-events: none;
+        z-index: 15;
+      }
+      .control-btn {
+        pointer-events: auto;
+        width: 100px;
+        height: 100px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 40px;
+        color: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(4px);
+      }
+      .control-btn:active {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      @media (min-width: 1025px) {
+        #mobile-controls {
+          display: none;
+        }
+      }
+    </style>
+    <!-- THREE.JS Core -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- GLTFLoader -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  </head>
+  <body>
+    <div id="game-container">
+      <div id="ui-layer">
+        <div id="score-display" class="hidden">0</div>
+
+        <div id="start-screen" class="panel">
+          <h1 id="game-title">Wybierz gracza</h1>
+          <div class="level-select">
+            <button class="level-btn active" onclick="selectLevel(0)">
+              Ojoj
+            </button>
+            <button class="level-btn" onclick="selectLevel(1)">Patec</button>
+            <button class="level-btn" onclick="selectLevel(2)">Łatwo</button>
+          </div>
+          <p>Dotrzyj do mety!</p>
+          <button id="start-btn">GRAJ</button>
+        </div>
+
+        <div id="game-over-screen" class="panel hidden">
+          <h1 id="end-title" style="color: #ff3366">Koniec!</h1>
+          <p>Wynik: <span id="final-score">0</span></p>
+          <button id="restart-btn">MENU</button>
+        </div>
+
+        <div id="mobile-controls">
+          <div id="btn-left" class="control-btn">❮</div>
+          <div id="btn-right" class="control-btn">❯</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const GAME_PARAMS = {
+        physics: {
+          laneWidth: 15,
+          lanesCount: 5,
+          baseSpeed: 0.5,
+          maxSpeed: 2.0,
+          acceleration: 0.0002,
+          playerLerp: 0.2,
+        },
+        road: {
+          length: 400,
+          textureRepeats: 20,
+        },
+        graphics: {
+          terrainSpeedFactor: -0.6,
+        },
+        gameplay: { duration: 30000 },
+        spawning: { obstacleRate: 0.05, coinRate: 0.06, buildingRate: 0.08 },
+      };
+
+      const LEVELS = [
+        {
+          name: "Wojtek Piździecki",
+          colors: {
+            background: 0x87ceeb,
+            fog: 0x87ceeb,
+            road: "#F4A460",
+            terrain: "#E3C896",
+            roadStripes: "#F0E68C",
+            uiPrimary: "#1E90FF",
+            uiDanger: "#FF4500",
+            uiSuccess: "#32CD32",
+          },
+          assets: {
+            player: { texture: "ojwojtek.png", width: 2.5, height: 4 },
+            obstacle: {
+              type: "png_sprite",
+              texture: "szczecin.png",
+              width: 2,
+              height: 1,
+            },
+            coin: { model: "leaf.glb" },
+            building: { type: "palm" },
+          },
+        },
+        {
+          name: "Patec małpiarz",
+          colors: {
+            background: 0x2e8b57,
+            fog: 0x154025,
+            road: "#5C4033",
+            terrain: "#2E4F2F",
+            roadStripes: "#8B4513",
+            uiPrimary: "#32CD32",
+            uiDanger: "#DC143C",
+            uiSuccess: "#ADFF2F",
+          },
+          assets: {
+            player: { texture: "patec.png", width: 2.5, height: 4 },
+            obstacle: {
+              type: "png_sprite",
+              texture: "shower.png",
+              width: 2,
+              height: 3,
+            },
+            coin: { model: "banana.glb" },
+            building: { type: "tree" },
+          },
+        },
+        {
+          name: "Łatwo pijany",
+          colors: {
+            background: 0x87cefa,
+            fog: 0xb0c4de,
+            road: "#808080",
+            terrain: "#444444",
+            roadStripes: "#D3D3D3",
+            uiPrimary: "#4682B4",
+            uiDanger: "#B22222",
+            uiSuccess: "#4169E1",
+          },
+          assets: {
+            player: { texture: "latwo.png", width: 2.5, height: 4 },
+            obstacle: {
+              type: "png_sprite",
+              texture: "mini_majk.png",
+              width: 2,
+              height: 3,
+            },
+            coin: { model: "pwio.glb" },
+            building: { type: "city_house" },
+          },
+        },
+      ];
+
+      const AssetFactory = {
+        textureLoader: new THREE.TextureLoader(),
+        gltfLoader: new THREE.GLTFLoader(),
+
+        prototypes: {
+          obstacle: null,
+          coin: null,
+          building: null,
+        },
+        textures: {},
+
+        loadedModels: {},
+        loadingStatus: {},
+        waitingCallbacks: {},
+
+        initLevelAssets: function (levelConfig) {
+          this.prototypes = { obstacle: null, coin: null, building: null };
+
+          if (levelConfig.assets.building.type === "palm") {
+            this.prototypes.building = this.createAttractivePalmPrototype();
+          } else if (levelConfig.assets.building.type === "tree") {
+            this.prototypes.building = this.createJungleTreePrototype();
+          } else {
+            this.prototypes.building = this.createCityHousePrototype();
+          }
+
+          if (levelConfig.assets.obstacle.type === "png_sprite") {
+            this.prototypes.obstacle =
+              this.createSpriteObstaclePrototype(levelConfig);
+          } else {
+            this.prototypes.obstacle =
+              this.createGeoObstaclePrototype(levelConfig);
+          }
+        },
+
+        preloadLevelAssets: function (levelConfig) {
+          const assets = levelConfig.assets;
+          // Preload models
+          if (assets.obstacle && assets.obstacle.model)
+            this.loadGLB(assets.obstacle.model);
+          if (assets.coin && assets.coin.model) this.loadGLB(assets.coin.model);
+        },
+
+        // --- ROBUST GLB LOADER WITH CALLBACK QUEUE ---
+        loadGLB: function (path, onSuccess) {
+          if (this.loadedModels[path]) {
+            if (onSuccess) onSuccess(this.loadedModels[path]);
+            return;
+          }
+
+          if (this.loadingStatus[path] === "loading") {
+            if (onSuccess) {
+              if (!this.waitingCallbacks[path])
+                this.waitingCallbacks[path] = [];
+              this.waitingCallbacks[path].push(onSuccess);
+            }
+            return;
+          }
+
+          this.loadingStatus[path] = "loading";
+          if (onSuccess) this.waitingCallbacks[path] = [onSuccess];
+
+          this.gltfLoader.load(
+            path,
+            (gltf) => {
+              const rawModel = gltf.scene;
+
+              // --- Normalize & Center GLB ---
+              const box = new THREE.Box3().setFromObject(rawModel);
+              const size = box.getSize(new THREE.Vector3());
+              const center = box.getCenter(new THREE.Vector3());
+
+              const wrapper = new THREE.Group();
+              wrapper.add(rawModel);
+              rawModel.position.sub(center);
+
+              const maxDim = Math.max(size.x, size.y, size.z);
+              if (maxDim > 0) {
+                const targetSize = 1.5;
+                const scaleFactor = targetSize / maxDim;
+                wrapper.scale.set(scaleFactor, scaleFactor, scaleFactor);
+              }
+
+              wrapper.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                  if (child.material) {
+                    child.material.side = THREE.DoubleSide;
+                    if (child.material.transparent)
+                      child.material.alphaTest = 0.5;
+                  }
+                }
+              });
+
+              // Store result
+              this.loadedModels[path] = wrapper;
+              this.loadingStatus[path] = "loaded";
+
+              // Execute all waiting callbacks
+              if (this.waitingCallbacks[path]) {
+                this.waitingCallbacks[path].forEach((cb) => cb(wrapper));
+                delete this.waitingCallbacks[path];
+              }
+            },
+            undefined,
+            (err) => {
+              console.warn(`GLB Error (${path}):`, err);
+              this.loadingStatus[path] = "error";
+            }
+          );
+        },
+
+        createDummyTexture: function (label, colorStr, type) {
+          const key = label + colorStr + type;
+          if (this.textures[key]) return this.textures[key];
+
+          const cvs = document.createElement("canvas");
+          cvs.width = 256;
+          cvs.height = 256;
+          const ctx = cvs.getContext("2d");
+
+          if (type === "sprite") {
+            ctx.clearRect(0, 0, 256, 256);
+          } else {
+            ctx.fillStyle = colorStr || "#999";
+            ctx.fillRect(0, 0, 256, 256);
+          }
+
+          if (label === "crab_placeholder") {
+            ctx.fillStyle = "#ff4500";
+            ctx.beginPath();
+            ctx.arc(128, 128, 60, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(60, 100, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(196, 100, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "white";
+            ctx.font = "40px Arial";
+            ctx.fillText("CRAB", 75, 140);
+          } else if (label === "rock_placeholder") {
+            ctx.fillStyle = "#555";
+            ctx.beginPath();
+            ctx.moveTo(50, 200);
+            ctx.lineTo(100, 50);
+            ctx.lineTo(200, 200);
+            ctx.fill();
+          } else {
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(80, 100, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(176, 100, 30, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          const tex = new THREE.CanvasTexture(cvs);
+          this.textures[key] = tex;
+          return tex;
+        },
+
+        createSpriteObstaclePrototype: function (levelConfig) {
+          const data = levelConfig.assets.obstacle;
+          const geo = new THREE.PlaneGeometry(data.width, data.height);
+          let tex;
+          if (data.texture.includes("_placeholder")) {
+            tex = this.createDummyTexture(data.texture, null, "sprite");
+          } else {
+            tex = this.textureLoader.load(data.texture);
+          }
+          const mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            transparent: true,
+            alphaTest: 0.5,
+            side: THREE.DoubleSide,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.castShadow = true;
+          mesh.userData.isObstacle = true;
+          return mesh;
+        },
+
+        createGeoObstaclePrototype: function (levelConfig) {
+          const oData = levelConfig.assets.obstacle;
+          let geo =
+            oData.type === "cylinder"
+              ? new THREE.CylinderGeometry(0.8, 0.8, 1.5, 12)
+              : new THREE.BoxGeometry(1.5, 1.5, 1.5);
+          const mat = new THREE.MeshStandardMaterial({
+            color: oData.color,
+            emissive: oData.emissive || 0x000000,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.castShadow = true;
+          return mesh;
+        },
+
+        createAttractivePalmPrototype: function () {
+          const group = new THREE.Group();
+          const trunkMat = new THREE.MeshStandardMaterial({
+            color: 0x8b4513,
+            roughness: 1.0,
+          });
+
+          const seg1 = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.6, 0.8, 3, 7),
+            trunkMat
+          );
+          seg1.position.y = 1.5;
+
+          const seg2 = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.5, 0.6, 3, 7),
+            trunkMat
+          );
+          seg2.position.y = 4.2;
+          seg2.rotation.x = 0.1;
+          seg2.position.z = 0.2;
+
+          const seg3 = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.4, 0.5, 3, 7),
+            trunkMat
+          );
+          seg3.position.y = 7.0;
+          seg3.rotation.x = 0.2;
+          seg3.position.z = 0.6;
+
+          group.add(seg1, seg2, seg3);
+
+          const leafGeo = new THREE.PlaneGeometry(2, 5);
+          leafGeo.translate(0, 2.5, 0);
+
+          const leafMat = new THREE.MeshStandardMaterial({
+            color: 0x32cd32,
+            side: THREE.DoubleSide,
+            transparent: true,
+            alphaTest: 0.5,
+          });
+
+          const ctx = document.createElement("canvas").getContext("2d");
+          ctx.canvas.width = 64;
+          ctx.canvas.height = 128;
+          ctx.fillStyle = "#fff";
+          ctx.beginPath();
+          ctx.ellipse(32, 64, 30, 60, 0, 0, Math.PI * 2);
+          ctx.fill();
+          const leafTex = new THREE.CanvasTexture(ctx.canvas);
+          leafMat.alphaMap = leafTex;
+          leafMat.map = leafTex;
+          leafMat.color.setHex(0x228b22);
+
+          const count = 7;
+          for (let i = 0; i < count; i++) {
+            const leaf = new THREE.Mesh(leafGeo, leafMat);
+            leaf.position.set(0, 8.2, 0.9);
+            leaf.rotation.y = (i / count) * Math.PI * 2;
+            leaf.rotation.x = Math.PI / 3;
+            group.add(leaf);
+          }
+          for (let i = 0; i < count; i++) {
+            const leaf = new THREE.Mesh(leafGeo, leafMat);
+            leaf.position.set(0, 8.0, 0.9);
+            leaf.rotation.y = ((i + 0.5) / count) * Math.PI * 2;
+            leaf.rotation.x = Math.PI / 2.8;
+            group.add(leaf);
+          }
+
+          group.traverse((o) => {
+            if (o.isMesh) o.castShadow = true;
+          });
+          group.scale.set(1.5, 1.5, 1.5);
+          return group;
+        },
+
+        createJungleTreePrototype: function () {
+          const group = new THREE.Group();
+          const trunk = new THREE.Mesh(
+            new THREE.CylinderGeometry(1, 1.5, 12, 8),
+            new THREE.MeshStandardMaterial({ color: 0x5c4033 })
+          );
+          trunk.position.y = 6;
+          trunk.castShadow = true;
+          group.add(trunk);
+
+          const leaves = new THREE.Mesh(
+            new THREE.DodecahedronGeometry(4),
+            new THREE.MeshStandardMaterial({ color: 0x006400 })
+          );
+          leaves.position.y = 11;
+          leaves.castShadow = true;
+          group.add(leaves);
+          return group;
+        },
+
+        createCityHousePrototype: function () {
+          const group = new THREE.Group();
+          const box = new THREE.Mesh(
+            new THREE.BoxGeometry(6, 15, 6),
+            new THREE.MeshStandardMaterial({ color: 0x777799 })
+          );
+          box.position.y = 7.5;
+          box.castShadow = true;
+          group.add(box);
+          return group;
+        },
+
+        spawnObstacle: function (levelConfig) {
+          if (this.prototypes.obstacle) return this.prototypes.obstacle.clone();
+          return new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+          );
+        },
+
+        spawnBuilding: function (levelConfig) {
+          if (this.prototypes.building) {
+            const b = this.prototypes.building.clone();
+            if (levelConfig.assets.building.type === "city_house") {
+              b.scale.y = 0.8 + Math.random() * 0.5;
+            }
+            return b;
+          }
+          return new THREE.Mesh(
+            new THREE.BoxGeometry(2, 10, 2),
+            new THREE.MeshBasicMaterial({ color: 0x555555 })
+          );
+        },
+
+        // --- SMART SPAWN COIN: Handles Async Loading ---
+        spawnCoin: function (levelConfig) {
+          const group = new THREE.Group();
+          const cData = levelConfig.assets.coin;
+
+          // Helper to create the default fallback mesh
+          const createFallback = () => {
+            let geo;
+            if (cData.type === "torus")
+              geo = new THREE.TorusGeometry(0.3, 0.1, 8, 16);
+            else geo = new THREE.OctahedronGeometry(0.5, 0);
+            const mat = new THREE.MeshStandardMaterial({
+              color: cData.color || 0xffd700,
+              emissive: cData.color || 0xffd700,
+              emissiveIntensity: 0.6,
+            });
+            return new THREE.Mesh(geo, mat);
+          };
+
+          if (cData.model) {
+            const fallback = createFallback();
+            fallback.name = "fallback_mesh";
+            group.add(fallback);
+
+            this.loadGLB(cData.model, (loadedModel) => {
+              const old = group.getObjectByName("fallback_mesh");
+              if (old) group.remove(old);
+
+              const m = loadedModel.clone();
+              group.add(m);
+            });
+          } else {
+            group.add(createFallback());
+          }
+
+          return group;
+        },
+
+        createPlayer: function (levelConfig) {
+          const pGroup = new THREE.Group();
+          const pData = levelConfig.assets.player;
+          const geometry = new THREE.PlaneGeometry(pData.width, pData.height);
+          const fallbackMap = this.createDummyTexture(
+            levelConfig.name,
+            levelConfig.colors.uiPrimary,
+            "default"
+          );
+
+          const texture = this.textureLoader.load(
+            pData.texture,
+            undefined,
+            undefined,
+            () => {
+              mesh.material.map = fallbackMap;
+              mesh.material.needsUpdate = true;
+            }
+          );
+
+          const material = new THREE.MeshStandardMaterial({
+            map: texture,
+            transparent: true,
+            alphaTest: 0.3,
+            side: THREE.DoubleSide,
+            roughness: 0.4,
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.y = pData.height / 2;
+          mesh.castShadow = true;
+
+          pGroup.add(mesh);
+          return pGroup;
+        },
+
+        createTerrainTexture: function (levelConfig) {
+          const canvas = document.createElement("canvas");
+          canvas.width = 512;
+          canvas.height = 512;
+          const ctx = canvas.getContext("2d");
+
+          ctx.fillStyle = levelConfig.colors.terrain;
+          ctx.fillRect(0, 0, 512, 512);
+
+          ctx.fillStyle = "rgba(0,0,0,0.1)";
+          for (let i = 0; i < 400; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const s = 2 + Math.random() * 5;
+            ctx.fillRect(x, y, s, s);
+          }
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          texture.repeat.set(20, 20);
+          texture.anisotropy = 16;
+          return texture;
+        },
+
+        createRoadTexture: function (levelConfig) {
+          const canvas = document.createElement("canvas");
+          canvas.width = 512;
+          canvas.height = 512;
+          const ctx = canvas.getContext("2d");
+          const c = levelConfig.colors;
+          ctx.fillStyle = c.road;
+          ctx.fillRect(0, 0, 512, 512);
+          ctx.fillStyle = c.roadStripes;
+          ctx.globalAlpha = 0.5;
+          const lanePx = 512 / GAME_PARAMS.physics.lanesCount;
+          for (let i = 1; i < GAME_PARAMS.physics.lanesCount; i++)
+            ctx.fillRect(i * lanePx - 2, 0, 4, 512);
+          ctx.globalAlpha = 1.0;
+          ctx.fillRect(0, 0, 10, 512);
+          ctx.fillRect(502, 0, 10, 512);
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          texture.repeat.set(1, GAME_PARAMS.road.textureRepeats);
+          texture.anisotropy = 16;
+          return texture;
+        },
+
+        createFinishLine: function () {
+          const canvas = document.createElement("canvas");
+          canvas.width = 128;
+          canvas.height = 32;
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, 128, 32);
+          ctx.fillStyle = "#000000";
+          const size = 16;
+          for (let y = 0; y < 2; y++)
+            for (let x = 0; x < 8; x++)
+              if ((x + y) % 2 === 0)
+                ctx.fillRect(x * size, y * size, size, size);
+          const tex = new THREE.CanvasTexture(canvas);
+          tex.magFilter = THREE.NearestFilter;
+          const geo = new THREE.BoxGeometry(
+            GAME_PARAMS.physics.laneWidth,
+            1,
+            4
+          );
+          const mat = new THREE.MeshStandardMaterial({ map: tex });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.receiveShadow = true;
+          return mesh;
+        },
+      };
+
+      // --- ENGINE VARIABLES ---
+      let scene, camera, renderer;
+      let currentLevelIndex = 0;
+      let activeLevel = LEVELS[0];
+      let player, roadMesh, terrainMesh, finishLine;
+      let obstacles = [],
+        buildings = [],
+        coins = [];
+      let isRunning = false;
+      let score = 0;
+      let speed = 0;
+      let gameStartTime = 0;
+      let finishLineSpawned = false;
+      let currentLane = 0;
+      let targetX = 0;
+
+      const ui = {
+        score: document.getElementById("score-display"),
+        start: document.getElementById("start-screen"),
+        over: document.getElementById("game-over-screen"),
+        finalScore: document.getElementById("final-score"),
+        title: document.getElementById("game-title"),
+        endTitle: document.getElementById("end-title"),
+        btns: document.querySelectorAll(".level-btn"),
+      };
+
+      function getLaneX(laneIndex) {
+        return (
+          laneIndex *
+          (GAME_PARAMS.physics.laneWidth / GAME_PARAMS.physics.lanesCount)
+        );
+      }
+
+      function initEngine() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(
+          60,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          200
+        );
+        camera.position.set(0, 6, 9);
+        camera.lookAt(0, 0, -10);
+
+        renderer = new THREE.WebGLRenderer({
+          antialias: true,
+          powerPreference: "high-performance",
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
+        document
+          .getElementById("game-container")
+          .appendChild(renderer.domElement);
+
+        const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambLight);
+
+        //  Shadow Camera to cover just the visible track area
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.camera.left = -30;
+        dirLight.shadow.camera.right = 30;
+        dirLight.shadow.camera.top = 50;
+        dirLight.shadow.camera.bottom = -50;
+        dirLight.shadow.camera.far = 100;
+        scene.add(dirLight);
+
+        setupInputs();
+        window.addEventListener("resize", () => {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        loadLevelVisuals(0);
+        animate();
+      }
+
+      function loadLevelVisuals(index) {
+        currentLevelIndex = index;
+        activeLevel = LEVELS[index];
+        ui.btns.forEach((btn, i) =>
+          btn.classList.toggle("active", i === index)
+        );
+        ui.title.innerText = activeLevel.name;
+        ui.title.style.color = new THREE.Color(
+          activeLevel.colors.uiPrimary
+        ).getStyle();
+        document.getElementById(
+          "score-display"
+        ).style.textShadow = `0 0 10px ${new THREE.Color(
+          activeLevel.colors.uiPrimary
+        ).getStyle()}`;
+
+        // Initialize optimized prototypes for this level
+        AssetFactory.initLevelAssets(activeLevel);
+
+        // Cleanup Scene
+        if (player) scene.remove(player);
+        if (roadMesh) scene.remove(roadMesh);
+        if (terrainMesh) scene.remove(terrainMesh);
+        if (finishLine) {
+          scene.remove(finishLine);
+          finishLine = null;
+        }
+        obstacles.forEach((o) => scene.remove(o));
+        obstacles = [];
+        coins.forEach((c) => scene.remove(c));
+        coins = [];
+        buildings.forEach((b) => scene.remove(b));
+        buildings = [];
+
+        scene.background = new THREE.Color(activeLevel.colors.background);
+        scene.fog = new THREE.Fog(activeLevel.colors.fog, 20, 90);
+
+        // --- ROAD ---
+        const rGeo = new THREE.PlaneGeometry(
+          GAME_PARAMS.physics.laneWidth,
+          GAME_PARAMS.road.length
+        );
+        const rMat = new THREE.MeshStandardMaterial({
+          map: AssetFactory.createRoadTexture(activeLevel),
+          roughness: 0.8,
+        });
+        roadMesh = new THREE.Mesh(rGeo, rMat);
+        roadMesh.rotation.x = -Math.PI / 2;
+        roadMesh.position.z = -100;
+        roadMesh.receiveShadow = true;
+        scene.add(roadMesh);
+
+        // --- TERRAIN ---
+        const tGeo = new THREE.PlaneGeometry(300, 300);
+        const tMat = new THREE.MeshStandardMaterial({
+          map: AssetFactory.createTerrainTexture(activeLevel),
+          roughness: 1.0,
+        });
+        terrainMesh = new THREE.Mesh(tGeo, tMat);
+        terrainMesh.rotation.x = -Math.PI / 2;
+        terrainMesh.position.y = -0.1;
+        terrainMesh.position.z = -100;
+        terrainMesh.receiveShadow = true;
+        scene.add(terrainMesh);
+
+        player = AssetFactory.createPlayer(activeLevel);
+        scene.add(player);
+      }
+
+      window.selectLevel = function (index) {
+        if (isRunning) return;
+        loadLevelVisuals(index);
+      };
+
+      function startGame() {
+        if (isRunning) return;
+        score = 0;
+        speed = GAME_PARAMS.physics.baseSpeed;
+        currentLane = 0;
+        targetX = getLaneX(0);
+        player.position.x = targetX;
+        player.rotation.set(0, 0, 0);
+
+        // Clear existing objects
+        obstacles.forEach((o) => scene.remove(o));
+        obstacles = [];
+        coins.forEach((c) => scene.remove(c));
+        coins = [];
+        buildings.forEach((b) => scene.remove(b));
+        buildings = [];
+        if (finishLine) {
+          scene.remove(finishLine);
+          finishLine = null;
+        }
+
+        ui.start.classList.add("hidden");
+        ui.over.classList.add("hidden");
+        ui.score.classList.remove("hidden");
+        ui.score.innerText = "0";
+        gameStartTime = Date.now();
+        finishLineSpawned = false;
+        isRunning = true;
+      }
+
+      function stopGame(reason) {
+        isRunning = false;
+        ui.score.classList.add("hidden");
+        ui.over.classList.remove("hidden");
+        if (reason === "finish") {
+          score = score * 10;
+          ui.endTitle.innerText = "POZIOM UKOŃCZONY!";
+          ui.endTitle.style.color = activeLevel.colors.uiSuccess;
+          ui.finalScore.style.color = activeLevel.colors.uiSuccess;
+        } else {
+          ui.endTitle.innerText = "Zgubiłeś paszport!";
+          ui.endTitle.style.color = activeLevel.colors.uiDanger;
+          ui.finalScore.style.color = "#fff";
+        }
+        ui.finalScore.innerText = score;
+      }
+
+      function returnToMenu() {
+        ui.over.classList.add("hidden");
+        ui.start.classList.remove("hidden");
+        loadLevelVisuals(currentLevelIndex);
+      }
+      function changeLane(dir) {
+        const maxLane = Math.floor(GAME_PARAMS.physics.lanesCount / 2);
+        const next = currentLane + dir;
+        if (next >= -maxLane && next <= maxLane) {
+          currentLane = next;
+          targetX = getLaneX(currentLane);
+        }
+      }
+
+      function update() {
+        if (!isRunning) return;
+        speed += GAME_PARAMS.physics.acceleration;
+        if (speed > GAME_PARAMS.physics.maxSpeed)
+          speed = GAME_PARAMS.physics.maxSpeed;
+
+        const timeElapsed = Date.now() - gameStartTime;
+        if (!finishLineSpawned && timeElapsed > GAME_PARAMS.gameplay.duration) {
+          finishLineSpawned = true;
+          finishLine = AssetFactory.createFinishLine();
+          finishLine.position.z = -120;
+          scene.add(finishLine);
+        }
+
+        // --- SCROLLING ENVIRONMENTS ---
+        if (roadMesh.material.map)
+          roadMesh.material.map.offset.y -=
+            speed / (GAME_PARAMS.road.length / GAME_PARAMS.road.textureRepeats);
+
+        if (terrainMesh && terrainMesh.material.map) {
+          const terrainSpeed = speed * GAME_PARAMS.graphics.terrainSpeedFactor;
+          terrainMesh.material.map.offset.y -= (terrainSpeed / 300) * 20;
+        }
+
+        // --- SPAWNING ---
+        const maxLane = Math.floor(GAME_PARAMS.physics.lanesCount / 2);
+        if (!finishLineSpawned) {
+          if (Math.random() < GAME_PARAMS.spawning.obstacleRate) {
+            const obs = AssetFactory.spawnObstacle(activeLevel);
+            const laneIdx =
+              Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
+              maxLane;
+            obs.position.set(
+              getLaneX(laneIdx),
+              obs.userData.isObstacle ? 1.5 : 0.75,
+              -80
+            );
+            scene.add(obs);
+            obstacles.push(obs);
+          }
+          if (Math.random() < GAME_PARAMS.spawning.coinRate) {
+            const c = AssetFactory.spawnCoin(activeLevel);
+            const laneIdx =
+              Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
+              maxLane;
+            c.position.set(getLaneX(laneIdx), 1.0, -80);
+            scene.add(c);
+            coins.push(c);
+          }
+        }
+        if (Math.random() < GAME_PARAMS.spawning.buildingRate) {
+          const b = AssetFactory.spawnBuilding(activeLevel);
+          const side = Math.random() > 0.5 ? 1 : -1;
+          const dist =
+            GAME_PARAMS.physics.laneWidth / 2 + 5 + Math.random() * 5;
+          b.position.set(side * dist, 0, -90);
+          b.rotation.y = Math.random() * Math.PI * 2;
+          scene.add(b);
+          buildings.push(b);
+        }
+
+        // --- MOVEMENT & COLLISION ---
+        const moveObj = (arr, type) => {
+          for (let i = arr.length - 1; i >= 0; i--) {
+            const obj = arr[i];
+            obj.position.z += speed;
+            if (type === "coin") obj.rotation.y += 0.05;
+
+            if (obj.position.z > -1.5 && obj.position.z < 1.5) {
+              const dist = Math.abs(obj.position.x - player.position.x);
+              if (type === "obstacle" && dist < 1.2) stopGame("crash");
+              else if (type === "coin" && dist < 1.2) {
+                scene.remove(obj);
+                arr.splice(i, 1);
+                score += 50;
+                ui.score.innerText = score;
+                continue;
+              }
+            }
+            if (obj.position.z > 20) {
+              scene.remove(obj);
+              arr.splice(i, 1);
+            }
+          }
+        };
+        moveObj(obstacles, "obstacle");
+        moveObj(coins, "coin");
+        moveObj(buildings, "building");
+
+        if (finishLine) {
+          finishLine.position.z += speed;
+          if (finishLine.position.z > 0) stopGame("finish");
+        }
+
+        player.position.x +=
+          (targetX - player.position.x) * GAME_PARAMS.physics.playerLerp;
+        const tilt = (player.position.x - targetX) * 0.15;
+        player.rotation.z = tilt;
+        player.rotation.y = -tilt * 0.5;
+      }
+
+      function setupInputs() {
+        document.addEventListener("keydown", (e) => {
+          if (isRunning) {
+            if (e.key === "ArrowLeft") changeLane(-1);
+            if (e.key === "ArrowRight") changeLane(1);
+          }
+        });
+        const handleTap = (dir) => (e) => {
+          e.preventDefault();
+          if (!isRunning) return;
+          changeLane(dir);
+          e.target.style.background = "rgba(255,255,255,0.4)";
+          setTimeout(
+            () => (e.target.style.background = "rgba(255,255,255,0.1)"),
+            100
+          );
+        };
+        const btnL = document.getElementById("btn-left");
+        const btnR = document.getElementById("btn-right");
+        btnL.addEventListener("touchstart", handleTap(-1), { passive: false });
+        btnR.addEventListener("touchstart", handleTap(1), { passive: false });
+        btnL.addEventListener("mousedown", handleTap(-1));
+        btnR.addEventListener("mousedown", handleTap(1));
+        document
+          .getElementById("start-btn")
+          .addEventListener("click", startGame);
+        document
+          .getElementById("restart-btn")
+          .addEventListener("click", returnToMenu);
+      }
+      function animate() {
+        requestAnimationFrame(animate);
+        update();
+        renderer.render(scene, camera);
+      }
+      initEngine();
+    </script>
+  </body>
+</html>
