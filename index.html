@@ -264,8 +264,8 @@
             <button class="level-btn" onclick="selectLevel(1)">Patec</button>
             <button class="level-btn" onclick="selectLevel(2)">Łatwo</button>
           </div>
-          <p>Unikaj przeszkód.<br />Zbieraj monety.</p>
-          <button id="start-btn">START GAME</button>
+          <p>Unikaj przeszkód.<br />Zbieraj swoje atrybuty.</p>
+          <button id="start-btn">START</button>
         </div>
 
         <div id="game-over-screen" class="panel hidden">
@@ -274,7 +274,7 @@
             WYNIK:
             <span id="final-score" style="color: var(--retro-green)">0</span>
           </p>
-          <button id="restart-btn">TRY AGAIN</button>
+          <button id="restart-btn">SPRÓBUJ PONOWNIE</button>
         </div>
 
         <div id="mobile-controls">
@@ -329,6 +329,12 @@
             coin: { model: "leaf.glb" },
             building: { type: "palm" },
           },
+          messages: {
+            win: "Brawo! udało Ci się usmażyć swój mózg!",
+            lose: "No i cyk do prokuratury!",
+            buttonWin: "Essa, dawaj jeszcze raz!",
+            buttonLose: "Dzwonię do Papugi",
+          },
         },
         {
           name: "Patec małpiarz",
@@ -353,6 +359,12 @@
             coin: { model: "banana.glb" },
             building: { type: "tree" },
           },
+          messages: {
+            win: "Klasa, małpy są z Ciebie dumne!",
+            lose: "Niestety, Mini Majk nie dzieli się bananami...",
+            buttonWin: "Zagraj ponownie!",
+            buttonLose: "Mini Majk to brzdąc",
+          },
         },
         {
           name: "Łatwo pijany",
@@ -376,6 +388,12 @@
             },
             coin: { model: "pwio.glb" },
             building: { type: "city_house" },
+          },
+          messages: {
+            win: "No i klasa, zaliczyłeś zgona!",
+            lose: "Weź prysznic Arizam",
+            buttonWin: "Jeszcze mi mało!",
+            buttonLose: "Już się umyłem",
           },
         },
       ];
@@ -854,6 +872,7 @@
         finalScore: document.getElementById("final-score"),
         title: document.getElementById("game-title"),
         endTitle: document.getElementById("end-title"),
+        endButton: document.getElementById("restart-btn"),
         btns: document.querySelectorAll(".level-btn"),
       };
 
@@ -1031,11 +1050,13 @@
         ui.over.classList.remove("hidden");
         if (reason === "finish") {
           score = score * 10;
-          ui.endTitle.innerText = "LEVEL CLEAR!";
+          ui.endTitle.innerText = activeLevel.messages.win;
+          ui.endButton.innerText = activeLevel.messages.buttonWin;
           ui.endTitle.style.color = activeLevel.colors.uiSuccess;
           ui.finalScore.style.color = activeLevel.colors.uiSuccess;
         } else {
-          ui.endTitle.innerText = "GAME OVER";
+          ui.endTitle.innerText = activeLevel.messages.lose;
+          ui.endButton.innerText = activeLevel.messages.buttonLose;
           ui.endTitle.style.color = "#ff3333";
           ui.finalScore.style.color = "#fff";
         }
