@@ -373,6 +373,11 @@
             winScore: 420,
             scoremessage: "Humor: ",
           },
+          sounds: {
+            coin: "sounds/coin.mp3",
+            win: "sounds/azizam.mp3",
+            lose: "sounds/loteria.mp3",
+          },
         },
         {
           name: "Patec małpiarz",
@@ -399,7 +404,7 @@
           },
           messages: {
             win: "Klasa, małpy są z Ciebie dumne!",
-            lose: "Niestety, Mini Majk nie dzieli się bananami...",
+            lose: "Mini Majk schował banany!",
             buttonWin: "Zagraj ponownie!",
             buttonLose: "Mini Majk to brzdąc",
           },
@@ -407,6 +412,11 @@
             coinValue: 10,
             winScore: 130,
             scoremessage: "Banany: ",
+          },
+          sounds: {
+            coin: "sounds/coin.mp3",
+            win: "sounds/azizam.mp3",
+            lose: "sounds/majkel.mp3",
           },
         },
         {
@@ -443,8 +453,47 @@
             winScore: 5.1,
             scoremessage: "Promile: ",
           },
+          sounds: {
+            coin: "sounds/coin.mp3",
+            win: "sounds/azizam.mp3",
+            lose: "sounds/latwo.mp3",
+          },
         },
       ];
+
+      const SoundFactory = {
+        currentSounds: {
+          coin: null,
+          win: null,
+          lose: null,
+        },
+
+        loadLevelSounds: function (levelConfig) {
+          if (!levelConfig.sounds) {
+            console.warn("No sounds defined for level: " + levelConfig.name);
+            this.currentSounds = { coin: null, win: null, lose: null };
+            return;
+          }
+          this.currentSounds.coin = new Audio(levelConfig.sounds.coin);
+          this.currentSounds.win = new Audio(levelConfig.sounds.win);
+          this.currentSounds.lose = new Audio(levelConfig.sounds.lose);
+          this.currentSounds.coin.volume = 0.6;
+        },
+
+        play: function (type) {
+          const audio = this.currentSounds[type];
+          if (!audio) return;
+
+          if (type === "coin") {
+            const clone = audio.cloneNode();
+            clone.volume = audio.volume;
+            clone.play().catch((e) => console.warn("Audio play failed", e));
+          } else {
+            audio.currentTime = 0;
+            audio.play().catch((e) => console.warn("Audio play failed", e));
+          }
+        },
+      };
 
       const AssetFactory = {
         textureLoader: new THREE.TextureLoader(),
@@ -971,6 +1020,9 @@
       function loadLevelVisuals(index) {
         currentLevelIndex = index;
         activeLevel = LEVELS[index];
+
+        SoundFactory.loadLevelSounds(activeLevel);
+
         ui.btns.forEach((btn, i) =>
           btn.classList.toggle("active", i === index)
         );
@@ -1067,11 +1119,13 @@
         ui.finalScore.innerText = score;
         ui.finalScoreP.innerText = activeLevel.gameplay.scoremessage;
         if (reason === "finish") {
+          SoundFactory.play("win");
           ui.endTitle.innerText = activeLevel.messages.win;
           ui.endButton.innerText = activeLevel.messages.buttonWin;
           ui.endTitle.style.color = activeLevel.colors.uiSuccess;
           ui.finalScore.style.color = activeLevel.colors.uiSuccess;
         } else {
+          SoundFactory.play("lose");
           ui.endTitle.innerText = activeLevel.messages.lose;
           ui.endButton.innerText = activeLevel.messages.buttonLose;
           ui.endTitle.style.color = "#ff3333";
@@ -1156,6 +1210,7 @@
               else if (type === "coin" && dist < 1.2) {
                 scene.remove(obj);
                 arr.splice(i, 1);
+                SoundFactory.play("coin");
                 score += activeLevel.gameplay.coinValue;
 
                 score = Math.round(score * 10) / 10;
