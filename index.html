@@ -244,6 +244,27 @@
       #game-over-screen h1 {
         color: #ff3333;
       }
+
+      #start-screen,
+      #restart-btn,
+      #game-over-screen {
+        word-spacing: -5px;
+        text-align: center;
+      }
+
+      #game-title,
+      #end-title {
+        word-spacing: -10px;
+      }
+      #score-display {
+        word-spacing: -20px;
+      }
+      #score-display {
+        font-size: 24px;
+      }
+      #restart-btn {
+        line-height: 1.8;
+      }
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -270,10 +291,22 @@
 
         <div id="game-over-screen" class="panel hidden">
           <h1 id="end-title">GAME OVER</h1>
-          <p>
-            WYNIK:
-            <span id="final-score" style="color: var(--retro-green)">0</span>
-          </p>
+          <div
+            style="
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100%;
+              min-height: 48px;
+            "
+          >
+            <p id="final-score-p" style="margin: 0">WYNIK:</p>
+            <span
+              id="final-score"
+              style="color: var(--retro-green); margin-left: 8px"
+              >0</span
+            >
+          </div>
           <button id="restart-btn">SPRÓBUJ PONOWNIE</button>
         </div>
 
@@ -335,6 +368,11 @@
             buttonWin: "Essa, dawaj jeszcze raz!",
             buttonLose: "Dzwonię do Papugi",
           },
+          gameplay: {
+            coinValue: 20,
+            winScore: 420,
+            scoremessage: "Humor: ",
+          },
         },
         {
           name: "Patec małpiarz",
@@ -365,6 +403,11 @@
             buttonWin: "Zagraj ponownie!",
             buttonLose: "Mini Majk to brzdąc",
           },
+          gameplay: {
+            coinValue: 10,
+            winScore: 130,
+            scoremessage: "Banany: ",
+          },
         },
         {
           name: "Łatwo pijany",
@@ -391,9 +434,14 @@
           },
           messages: {
             win: "No i klasa, zaliczyłeś zgona!",
-            lose: "Weź prysznic Arizam",
+            lose: "Weź prysznic Azizam",
             buttonWin: "Jeszcze mi mało!",
             buttonLose: "Już się umyłem",
+          },
+          gameplay: {
+            coinValue: 0.3,
+            winScore: 5.1,
+            scoremessage: "Promile: ",
           },
         },
       ];
@@ -818,42 +866,13 @@
           this.textures[key] = texture;
           return texture;
         },
-
-        createFinishLine: function () {
-          const key = "finish_line";
-          if (this.textures[key]) {
-          }
-          const canvas = document.createElement("canvas");
-          canvas.width = 128;
-          canvas.height = 32;
-          const ctx = canvas.getContext("2d");
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, 128, 32);
-          ctx.fillStyle = "#000000";
-          const size = 16;
-          for (let y = 0; y < 2; y++)
-            for (let x = 0; x < 8; x++)
-              if ((x + y) % 2 === 0)
-                ctx.fillRect(x * size, y * size, size, size);
-          const tex = new THREE.CanvasTexture(canvas);
-          tex.magFilter = THREE.NearestFilter;
-          const geo = new THREE.BoxGeometry(
-            GAME_PARAMS.physics.laneWidth,
-            1,
-            4
-          );
-          const mat = new THREE.MeshStandardMaterial({ map: tex });
-          const mesh = new THREE.Mesh(geo, mat);
-          mesh.receiveShadow = true;
-          return mesh;
-        },
       };
 
       // --- ENGINE VARIABLES ---
       let scene, camera, renderer;
       let currentLevelIndex = 0;
       let activeLevel = LEVELS[0];
-      let player, roadMesh, terrainMesh, finishLine;
+      let player, roadMesh, terrainMesh;
       let obstacles = [],
         buildings = [],
         coins = [];
@@ -861,7 +880,7 @@
       let score = 0;
       let speed = 0;
       let gameStartTime = 0;
-      let finishLineSpawned = false;
+
       let currentLane = 0;
       let targetX = 0;
 
@@ -874,6 +893,7 @@
         endTitle: document.getElementById("end-title"),
         endButton: document.getElementById("restart-btn"),
         btns: document.querySelectorAll(".level-btn"),
+        finalScoreP: document.getElementById("final-score-p"),
       };
 
       function getLaneX(laneIndex) {
@@ -963,10 +983,7 @@
         dispose3DObject(player);
         dispose3DObject(roadMesh);
         dispose3DObject(terrainMesh);
-        if (finishLine) {
-          dispose3DObject(finishLine);
-          finishLine = null;
-        }
+
         obstacles.forEach((o) => dispose3DObject(o));
         obstacles = [];
         coins.forEach((c) => dispose3DObject(c));
@@ -1030,17 +1047,16 @@
         coins = [];
         buildings.forEach((b) => dispose3DObject(b));
         buildings = [];
-        if (finishLine) {
-          dispose3DObject(finishLine);
-          finishLine = null;
-        }
 
         ui.start.classList.add("hidden");
         ui.over.classList.add("hidden");
         ui.score.classList.remove("hidden");
-        ui.score.innerText = "SCORE: 0";
+        if (activeLevel.gameplay.coinValue === 0.3) {
+          ui.score.style.fontSize = "20px";
+        }
+        ui.score.innerText = `${activeLevel.gameplay.scoremessage} 0 / ${activeLevel.gameplay.winScore}`;
         gameStartTime = Date.now();
-        finishLineSpawned = false;
+
         isRunning = true;
       }
 
@@ -1048,8 +1064,9 @@
         isRunning = false;
         ui.score.classList.add("hidden");
         ui.over.classList.remove("hidden");
+        ui.finalScore.innerText = score;
+        ui.finalScoreP.innerText = activeLevel.gameplay.scoremessage;
         if (reason === "finish") {
-          score = score * 10;
           ui.endTitle.innerText = activeLevel.messages.win;
           ui.endButton.innerText = activeLevel.messages.buttonWin;
           ui.endTitle.style.color = activeLevel.colors.uiSuccess;
@@ -1060,7 +1077,6 @@
           ui.endTitle.style.color = "#ff3333";
           ui.finalScore.style.color = "#fff";
         }
-        ui.finalScore.innerText = score;
       }
 
       function returnToMenu() {
@@ -1083,14 +1099,6 @@
         if (speed > GAME_PARAMS.physics.maxSpeed)
           speed = GAME_PARAMS.physics.maxSpeed;
 
-        const timeElapsed = Date.now() - gameStartTime;
-        if (!finishLineSpawned && timeElapsed > GAME_PARAMS.gameplay.duration) {
-          finishLineSpawned = true;
-          finishLine = AssetFactory.createFinishLine();
-          finishLine.position.z = -120;
-          scene.add(finishLine);
-        }
-
         if (roadMesh.material.map)
           roadMesh.material.map.offset.y -=
             speed / (GAME_PARAMS.road.length / GAME_PARAMS.road.textureRepeats);
@@ -1101,30 +1109,30 @@
         }
 
         const maxLane = Math.floor(GAME_PARAMS.physics.lanesCount / 2);
-        if (!finishLineSpawned) {
-          if (Math.random() < GAME_PARAMS.spawning.obstacleRate) {
-            const obs = AssetFactory.spawnObstacle(activeLevel);
-            const laneIdx =
-              Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
-              maxLane;
-            obs.position.set(
-              getLaneX(laneIdx),
-              obs.userData.isObstacle ? 1.5 : 0.75,
-              -80
-            );
-            scene.add(obs);
-            obstacles.push(obs);
-          }
-          if (Math.random() < GAME_PARAMS.spawning.coinRate) {
-            const c = AssetFactory.spawnCoin(activeLevel);
-            const laneIdx =
-              Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
-              maxLane;
-            c.position.set(getLaneX(laneIdx), 1.0, -80);
-            scene.add(c);
-            coins.push(c);
-          }
+
+        if (Math.random() < GAME_PARAMS.spawning.obstacleRate) {
+          const obs = AssetFactory.spawnObstacle(activeLevel);
+          const laneIdx =
+            Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
+            maxLane;
+          obs.position.set(
+            getLaneX(laneIdx),
+            obs.userData.isObstacle ? 1.5 : 0.75,
+            -80
+          );
+          scene.add(obs);
+          obstacles.push(obs);
         }
+        if (Math.random() < GAME_PARAMS.spawning.coinRate) {
+          const c = AssetFactory.spawnCoin(activeLevel);
+          const laneIdx =
+            Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
+            maxLane;
+          c.position.set(getLaneX(laneIdx), 1.0, -80);
+          scene.add(c);
+          coins.push(c);
+        }
+
         if (Math.random() < GAME_PARAMS.spawning.buildingRate) {
           const b = AssetFactory.spawnBuilding(activeLevel);
           const side = Math.random() > 0.5 ? 1 : -1;
@@ -1148,8 +1156,15 @@
               else if (type === "coin" && dist < 1.2) {
                 scene.remove(obj);
                 arr.splice(i, 1);
-                score += 50;
-                ui.score.innerText = "SCORE: " + score;
+                score += activeLevel.gameplay.coinValue;
+
+                score = Math.round(score * 10) / 10;
+
+                ui.score.innerText = `${activeLevel.gameplay.scoremessage} ${score} / ${activeLevel.gameplay.winScore}`;
+                if (score >= activeLevel.gameplay.winScore) {
+                  stopGame("finish");
+                  return;
+                }
                 continue;
               }
             }
@@ -1162,11 +1177,6 @@
         moveObj(obstacles, "obstacle");
         moveObj(coins, "coin");
         moveObj(buildings, "building");
-
-        if (finishLine) {
-          finishLine.position.z += speed;
-          if (finishLine.position.z > 0) stopGame("finish");
-        }
 
         player.position.x +=
           (targetX - player.position.x) * GAME_PARAMS.physics.playerLerp;
