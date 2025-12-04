@@ -360,7 +360,7 @@
               height: 1,
             },
             coin: { model: "leaf.glb" },
-            building: { type: "palm" },
+            building: { model: "palm.glb" },
           },
           messages: {
             win: "Brawo! udało Ci się usmażyć swój mózg!",
@@ -383,7 +383,7 @@
           name: "Patec małpiarz",
           colors: {
             background: 0x2e8b57,
-            fog: 0x154025,
+            fog: 0x4a7c59,
             road: "#5C4033",
             terrain: "#2E4F2F",
             roadStripes: "#8B4513",
@@ -439,7 +439,7 @@
               width: 2,
               height: 3,
             },
-            coin: { model: "pwio.glb" },
+            coin: { model: "piwo.glb" },
             building: { type: "city_house" },
           },
           messages: {
@@ -513,14 +513,25 @@
         initLevelAssets: function (levelConfig) {
           this.prototypes = { obstacle: null, coin: null, building: null };
 
-          if (levelConfig.assets.building.type === "palm") {
-            this.prototypes.building = this.createAttractivePalmPrototype();
-          } else if (levelConfig.assets.building.type === "tree") {
+          const bData = levelConfig.assets.building;
+
+          if (bData.model) {
+            this.loadGLB(bData.model, (model) => {
+              model.scale.set(1, 1, 1);
+
+              this.prototypes.building = model;
+            });
+          }
+          // --- Standard Fallbacks ---
+          else if (bData.type === "palm") {
+            this.prototypes.building = this.createPalmPrototype();
+          } else if (bData.type === "tree") {
             this.prototypes.building = this.createJungleTreePrototype();
           } else {
             this.prototypes.building = this.createCityHousePrototype();
           }
 
+          // Obstacle Logic (Unchanged)
           if (levelConfig.assets.obstacle.type === "png_sprite") {
             this.prototypes.obstacle =
               this.createSpriteObstaclePrototype(levelConfig);
@@ -528,6 +539,24 @@
             this.prototypes.obstacle =
               this.createGeoObstaclePrototype(levelConfig);
           }
+        },
+
+        spawnBuilding: function (levelConfig) {
+          if (this.prototypes.building) {
+            const b = this.prototypes.building.clone();
+            if (levelConfig.assets.building.type === "city_house") {
+              b.scale.y = 0.8 + Math.random() * 0.5;
+            }
+            if (levelConfig.assets.building.model === "palm.glb") {
+              b.position.y += 10; // Try 3, 4, 5, 6, etc.
+            }
+
+            return b;
+          }
+          return new THREE.Mesh(
+            new THREE.BoxGeometry(2, 10, 2),
+            new THREE.MeshBasicMaterial({ color: 0x555555, wireframe: true })
+          );
         },
 
         // --- OPTIMIZED LOAD GLB ---
@@ -556,7 +585,8 @@
               const center = box.getCenter(new THREE.Vector3());
               const wrapper = new THREE.Group();
               wrapper.add(rawModel);
-              rawModel.position.sub(center);
+              const bottomY = box.min.y;
+              rawModel.position.set(-center.x, -bottomY, -center.z);
               const maxDim = Math.max(size.x, size.y, size.z);
               if (maxDim > 0) {
                 const targetSize = 1.5;
@@ -655,7 +685,7 @@
         },
 
         // --- PALM TREE ---
-        createAttractivePalmPrototype: function () {
+        createPalmPrototype: function () {
           const group = new THREE.Group();
           const trunkMat = new THREE.MeshStandardMaterial({
             color: 0x8b4513,
@@ -735,32 +765,339 @@
 
         createJungleTreePrototype: function () {
           const group = new THREE.Group();
+
+          // Thick, textured trunk with natural variation
+          const trunkMaterial = new THREE.MeshStandardMaterial({
+            color: 0x4a3520,
+            roughness: 0.95,
+            metalness: 0.05,
+          });
+
+          // Main trunk - wider at base
           const trunk = new THREE.Mesh(
-            new THREE.CylinderGeometry(1, 1.5, 12, 8),
-            new THREE.MeshStandardMaterial({ color: 0x5c4033 })
+            new THREE.CylinderGeometry(0.8, 1.6, 12, 8),
+            trunkMaterial
           );
           trunk.position.y = 6;
           trunk.castShadow = true;
           group.add(trunk);
-          const leaves = new THREE.Mesh(
-            new THREE.DodecahedronGeometry(4),
-            new THREE.MeshStandardMaterial({ color: 0x006400 })
+
+          // Add bark texture with protruding elements
+          for (let i = 0; i < 5; i++) {
+            const barkDetail = new THREE.Mesh(
+              new THREE.BoxGeometry(0.3, 2, 0.3),
+              new THREE.MeshStandardMaterial({ color: 0x3d2b1f })
+            );
+            const angle = (i / 5) * Math.PI * 2;
+            barkDetail.position.set(
+              Math.cos(angle) * 1.2,
+              2 + i * 2,
+              Math.sin(angle) * 1.2
+            );
+            barkDetail.rotation.y = angle;
+            group.add(barkDetail);
+          }
+
+          // Exposed roots at base
+          const rootMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3d2b1f,
+            roughness: 0.9,
+          });
+
+          for (let i = 0; i < 6; i++) {
+            const angle = (i / 6) * Math.PI * 2;
+            const root = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.25, 0.4, 2, 6),
+              rootMaterial
+            );
+            root.position.set(
+              Math.cos(angle) * 1.2,
+              0.5,
+              Math.sin(angle) * 1.2
+            );
+            root.rotation.z = Math.cos(angle) * 0.5;
+            root.rotation.x = Math.sin(angle) * 0.5;
+            root.castShadow = true;
+            group.add(root);
+          }
+
+          // Layered canopy - multiple levels for dense jungle look
+          const darkGreen = new THREE.MeshStandardMaterial({
+            color: 0x1a4d1a,
+            roughness: 0.9,
+          });
+
+          const mediumGreen = new THREE.MeshStandardMaterial({
+            color: 0x2d5a2d,
+            roughness: 0.85,
+          });
+
+          const brightGreen = new THREE.MeshStandardMaterial({
+            color: 0x3d7a3d,
+            roughness: 0.8,
+          });
+
+          // Bottom canopy layer - largest and darkest
+          const canopy1 = new THREE.Mesh(
+            new THREE.SphereGeometry(4.5, 8, 8),
+            darkGreen
           );
-          leaves.position.y = 11;
-          leaves.castShadow = true;
-          group.add(leaves);
+          canopy1.position.y = 11;
+          canopy1.scale.set(1, 0.8, 1);
+          canopy1.castShadow = true;
+          group.add(canopy1);
+
+          // Middle canopy layers - irregular shapes
+          const canopy2 = new THREE.Mesh(
+            new THREE.SphereGeometry(3.5, 8, 8),
+            mediumGreen
+          );
+          canopy2.position.set(-1.5, 12.5, 1);
+          canopy2.scale.set(1.2, 0.9, 1);
+          canopy2.castShadow = true;
+          group.add(canopy2);
+
+          const canopy3 = new THREE.Mesh(
+            new THREE.SphereGeometry(3.2, 8, 8),
+            mediumGreen
+          );
+          canopy3.position.set(1.8, 12.8, -0.5);
+          canopy3.scale.set(1, 1.1, 1.2);
+          canopy3.castShadow = true;
+          group.add(canopy3);
+
+          // Top canopy - brightest, catches most light
+          const canopy4 = new THREE.Mesh(
+            new THREE.SphereGeometry(3, 8, 8),
+            brightGreen
+          );
+          canopy4.position.set(0.5, 14, 0.2);
+          canopy4.scale.set(1, 1.2, 1);
+          canopy4.castShadow = true;
+          group.add(canopy4);
+
+          // Additional foliage clusters for density
+          const foliageMaterial = new THREE.MeshStandardMaterial({
+            color: 0x2d5a2d,
+            roughness: 0.85,
+          });
+
+          for (let i = 0; i < 5; i++) {
+            const angle = (i / 5) * Math.PI * 2;
+            const cluster = new THREE.Mesh(
+              new THREE.SphereGeometry(1.5 + Math.random() * 0.5, 6, 6),
+              foliageMaterial
+            );
+            cluster.position.set(
+              Math.cos(angle) * (3 + Math.random()),
+              10.5 + Math.random() * 2,
+              Math.sin(angle) * (3 + Math.random())
+            );
+            cluster.castShadow = true;
+            group.add(cluster);
+          }
+
+          // Large branches emerging from canopy
+          const branchMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3d2b1f,
+            roughness: 0.9,
+          });
+
+          for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2 + Math.PI / 8;
+            const branch = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.3, 0.5, 4, 6),
+              branchMaterial
+            );
+            branch.position.set(
+              Math.cos(angle) * 1.5,
+              10,
+              Math.sin(angle) * 1.5
+            );
+            branch.rotation.z = Math.cos(angle) * 0.8;
+            branch.rotation.x = Math.sin(angle) * 0.8;
+            branch.castShadow = true;
+            group.add(branch);
+
+            // Smaller foliage at branch ends
+            const branchFoliage = new THREE.Mesh(
+              new THREE.SphereGeometry(1.8, 6, 6),
+              brightGreen
+            );
+            branchFoliage.position.set(
+              Math.cos(angle) * 4,
+              11.5,
+              Math.sin(angle) * 4
+            );
+            branchFoliage.scale.set(1, 0.8, 1);
+            branchFoliage.castShadow = true;
+            group.add(branchFoliage);
+          }
+
+          // Vines hanging down
+          const vineMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3a5a2a,
+            roughness: 0.8,
+          });
+
+          for (let i = 0; i < 3; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const vineLength = 4 + Math.random() * 3;
+            const vine = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.08, 0.12, vineLength, 4),
+              vineMaterial
+            );
+            vine.position.set(
+              Math.cos(angle) * (2 + Math.random() * 2),
+              11 - vineLength / 2,
+              Math.sin(angle) * (2 + Math.random() * 2)
+            );
+            vine.rotation.z = (Math.random() - 0.5) * 0.3;
+            vine.rotation.x = (Math.random() - 0.5) * 0.3;
+            group.add(vine);
+          }
+
           return group;
         },
 
         createCityHousePrototype: function () {
           const group = new THREE.Group();
-          const box = new THREE.Mesh(
+
+          // Random color palettes for European tenements
+          const colorPalettes = [
+            { main: 0xd4b896, accent: 0xc9a875, roof: 0x8b4513 }, // Warm beige/ochre
+            { main: 0xe8d5b7, accent: 0xd4c4a8, roof: 0x654321 }, // Light cream
+            { main: 0xc9b8a3, accent: 0xb5a68f, roof: 0x5c4033 }, // Tan
+            { main: 0xdcc9b3, accent: 0xc8b59f, roof: 0x704214 }, // Sand
+            { main: 0xb8a890, accent: 0xa89478, roof: 0x6b4423 }, // Darker beige
+            { main: 0xf5e6d3, accent: 0xe1d2bf, roof: 0x8b6914 }, // Pale yellow
+          ];
+
+          const palette =
+            colorPalettes[Math.floor(Math.random() * colorPalettes.length)];
+
+          // Main building body
+          const buildingMaterial = new THREE.MeshStandardMaterial({
+            color: palette.main,
+            roughness: 0.9,
+          });
+
+          const mainBuilding = new THREE.Mesh(
             new THREE.BoxGeometry(6, 15, 6),
-            new THREE.MeshStandardMaterial({ color: 0x777799 })
+            buildingMaterial
           );
-          box.position.y = 7.5;
-          box.castShadow = true;
-          group.add(box);
+          mainBuilding.position.y = 7.5;
+          mainBuilding.castShadow = true;
+          group.add(mainBuilding);
+
+          // Decorative horizontal bands (cornices)
+          const bandMaterial = new THREE.MeshStandardMaterial({
+            color: palette.accent,
+            roughness: 0.8,
+          });
+
+          // Top cornice
+          const topCornice = new THREE.Mesh(
+            new THREE.BoxGeometry(6.3, 0.5, 6.3),
+            bandMaterial
+          );
+          topCornice.position.y = 15;
+          topCornice.castShadow = true;
+          group.add(topCornice);
+
+          // Mid-level decorative bands
+          const midBand1 = new THREE.Mesh(
+            new THREE.BoxGeometry(6.2, 0.3, 6.2),
+            bandMaterial
+          );
+          midBand1.position.y = 10;
+          group.add(midBand1);
+
+          const midBand2 = new THREE.Mesh(
+            new THREE.BoxGeometry(6.2, 0.3, 6.2),
+            bandMaterial
+          );
+          midBand2.position.y = 5;
+          group.add(midBand2);
+
+          // Ground floor entrance door
+          const doorMaterial = new THREE.MeshStandardMaterial({
+            color: 0x4a3428,
+            roughness: 0.7,
+          });
+
+          const door = new THREE.Mesh(
+            new THREE.BoxGeometry(1.8, 3.5, 0.3),
+            doorMaterial
+          );
+          door.position.set(0, 1.75, 3.05);
+          group.add(door);
+
+          // Small balconies
+          const balconyMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8a8a8a,
+            metalness: 0.5,
+            roughness: 0.5,
+          });
+
+          for (let floor = 1; floor < 3; floor++) {
+            const balcony = new THREE.Mesh(
+              new THREE.BoxGeometry(2.8, 0.2, 0.9),
+              balconyMaterial
+            );
+            balcony.position.set(0, 3.5 + floor * 3.5, 3.5);
+            group.add(balcony);
+
+            // Balcony railing
+            const railing = new THREE.Mesh(
+              new THREE.BoxGeometry(2.8, 0.9, 0.1),
+              balconyMaterial
+            );
+            railing.position.set(0, 4 + floor * 3.5, 3.95);
+            group.add(railing);
+          }
+
+          // Triangular roof
+          const roofMaterial = new THREE.MeshStandardMaterial({
+            color: palette.roof,
+            roughness: 0.9,
+          });
+
+          // Create triangular roof using a pyramid/cone shape
+          const roofHeight = 4;
+          const roofGeometry = new THREE.ConeGeometry(5, roofHeight, 4);
+          const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+          roof.position.y = 15.25 + roofHeight / 2;
+          roof.rotation.y = Math.PI / 4; // Rotate 45 degrees to align with building
+          roof.castShadow = true;
+          group.add(roof);
+
+          // Optional: Add a chimney randomly
+          if (Math.random() > 0.3) {
+            const chimneyMaterial = new THREE.MeshStandardMaterial({
+              color: 0x8b4513,
+              roughness: 0.8,
+            });
+
+            const chimney = new THREE.Mesh(
+              new THREE.BoxGeometry(0.6, 2, 0.6),
+              chimneyMaterial
+            );
+            const xOffset = (Math.random() - 0.5) * 3;
+            const zOffset = (Math.random() - 0.5) * 3;
+            chimney.position.set(xOffset, 16.5, zOffset);
+            chimney.castShadow = true;
+            group.add(chimney);
+
+            // Chimney cap
+            const cap = new THREE.Mesh(
+              new THREE.BoxGeometry(0.8, 0.2, 0.8),
+              chimneyMaterial
+            );
+            cap.position.set(xOffset, 17.6, zOffset);
+            group.add(cap);
+          }
+
           return group;
         },
 
@@ -769,20 +1106,6 @@
           return new THREE.Mesh(
             new THREE.BoxGeometry(1, 1, 1),
             new THREE.MeshBasicMaterial({ color: 0xff0000 })
-          );
-        },
-
-        spawnBuilding: function (levelConfig) {
-          if (this.prototypes.building) {
-            const b = this.prototypes.building.clone();
-            if (levelConfig.assets.building.type === "city_house") {
-              b.scale.y = 0.8 + Math.random() * 0.5;
-            }
-            return b;
-          }
-          return new THREE.Mesh(
-            new THREE.BoxGeometry(2, 10, 2),
-            new THREE.MeshBasicMaterial({ color: 0x555555 })
           );
         },
 
