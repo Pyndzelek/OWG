@@ -499,6 +499,13 @@
         textureLoader: new THREE.TextureLoader(),
         gltfLoader: new THREE.GLTFLoader(),
 
+        // Storage for our reusable objects
+        pools: {
+          obstacle: [],
+          coin: [],
+          building: [],
+        },
+
         prototypes: {
           obstacle: null,
           coin: null,
@@ -510,20 +517,73 @@
         loadingStatus: {},
         waitingCallbacks: {},
 
+        // --- POOLING SYSTEM ---
+
+        resetPools: function () {
+          Object.keys(this.pools).forEach((key) => {
+            this.pools[key].forEach((obj) => {
+              obj.visible = false;
+              obj.position.set(0, -500, 0);
+            });
+          });
+        },
+
+        clearPools: function () {
+          Object.keys(this.pools).forEach((key) => {
+            this.pools[key].forEach((obj) => {
+              if (scene) scene.remove(obj);
+
+              obj.traverse((child) => {
+                if (child.isMesh) {
+                  if (child.geometry) child.geometry.dispose();
+                  if (child.material) {
+                    if (Array.isArray(child.material))
+                      child.material.forEach((m) => m.dispose());
+                    else child.material.dispose();
+                  }
+                }
+              });
+            });
+            this.pools[key] = [];
+          });
+        },
+
+        getFromPool: function (type, levelConfig, spawnLogic) {
+          const pool = this.pools[type];
+          let obj = pool.find((o) => !o.visible);
+
+          if (obj) {
+            obj.visible = true;
+            return obj;
+          }
+
+          obj = spawnLogic.call(this, levelConfig);
+          obj.userData.poolType = type;
+          pool.push(obj);
+          if (scene) scene.add(obj);
+
+          return obj;
+        },
+
+        recycle: function (obj) {
+          if (!obj) return;
+          obj.visible = false;
+          obj.position.set(0, -500, 0);
+        },
+
+        // --- INITIALIZATION ---
+
         initLevelAssets: function (levelConfig) {
           this.prototypes = { obstacle: null, coin: null, building: null };
+          this.resetPools();
 
           const bData = levelConfig.assets.building;
-
           if (bData.model) {
             this.loadGLB(bData.model, (model) => {
               model.scale.set(1, 1, 1);
-
               this.prototypes.building = model;
             });
-          }
-          // --- Standard Fallbacks ---
-          else if (bData.type === "palm") {
+          } else if (bData.type === "palm") {
             this.prototypes.building = this.createPalmPrototype();
           } else if (bData.type === "tree") {
             this.prototypes.building = this.createJungleTreePrototype();
@@ -531,7 +591,6 @@
             this.prototypes.building = this.createCityHousePrototype();
           }
 
-          // Obstacle Logic (Unchanged)
           if (levelConfig.assets.obstacle.type === "png_sprite") {
             this.prototypes.obstacle =
               this.createSpriteObstaclePrototype(levelConfig);
@@ -539,18 +598,80 @@
             this.prototypes.obstacle =
               this.createGeoObstaclePrototype(levelConfig);
           }
+
+          const cData = levelConfig.assets.coin;
+          if (cData.model) {
+            this.loadGLB(cData.model, (model) => {
+              const group = new THREE.Group();
+              group.add(model.clone());
+              this.prototypes.coin = group;
+            });
+          }
         },
 
-        spawnBuilding: function (levelConfig) {
+        // --- SPAWNERS  ---
+
+        getObstacle: function (levelConfig) {
+          return this.getFromPool(
+            "obstacle",
+            levelConfig,
+            this._createObstacleMesh
+          );
+        },
+        getCoin: function (levelConfig) {
+          return this.getFromPool("coin", levelConfig, this._createCoinMesh);
+        },
+        getBuilding: function (levelConfig) {
+          return this.getFromPool(
+            "building",
+            levelConfig,
+            this._createBuildingMesh
+          );
+        },
+
+        _createObstacleMesh: function (levelConfig) {
+          if (this.prototypes.obstacle) return this.prototypes.obstacle.clone();
+
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+          );
+          mesh.castShadow = true;
+          mesh.userData.isObstacle = true;
+          return mesh;
+        },
+
+        _createCoinMesh: function (levelConfig) {
+          const cData = levelConfig.assets.coin;
+
+          if (this.prototypes.coin) return this.prototypes.coin.clone();
+
+          const group = new THREE.Group();
+          let geo;
+          if (cData.type === "torus")
+            geo = new THREE.TorusGeometry(0.3, 0.1, 8, 16);
+          else geo = new THREE.OctahedronGeometry(0.5, 0);
+
+          const mat = new THREE.MeshStandardMaterial({
+            color: cData.color || 0xffd700,
+            emissive: cData.color || 0xffd700,
+            emissiveIntensity: 0.6,
+          });
+          const fallback = new THREE.Mesh(geo, mat);
+          group.add(fallback);
+          return group;
+        },
+
+        _createBuildingMesh: function (levelConfig) {
           if (this.prototypes.building) {
             const b = this.prototypes.building.clone();
+
             if (levelConfig.assets.building.type === "city_house") {
               b.scale.y = 0.8 + Math.random() * 0.5;
             }
             if (levelConfig.assets.building.model === "palm.glb") {
-              b.position.y += 10; // Try 3, 4, 5, 6, etc.
+              b.position.y += 10;
             }
-
             return b;
           }
           return new THREE.Mesh(
@@ -559,7 +680,8 @@
           );
         },
 
-        // --- OPTIMIZED LOAD GLB ---
+        // --- ASSET HELPERS  ---
+
         loadGLB: function (path, onSuccess) {
           if (this.loadedModels[path]) {
             if (onSuccess) onSuccess(this.loadedModels[path]);
@@ -580,20 +702,7 @@
             path,
             (gltf) => {
               const rawModel = gltf.scene;
-              const box = new THREE.Box3().setFromObject(rawModel);
-              const size = box.getSize(new THREE.Vector3());
-              const center = box.getCenter(new THREE.Vector3());
-              const wrapper = new THREE.Group();
-              wrapper.add(rawModel);
-              const bottomY = box.min.y;
-              rawModel.position.set(-center.x, -bottomY, -center.z);
-              const maxDim = Math.max(size.x, size.y, size.z);
-              if (maxDim > 0) {
-                const targetSize = 1.5;
-                const scaleFactor = targetSize / maxDim;
-                wrapper.scale.set(scaleFactor, scaleFactor, scaleFactor);
-              }
-              wrapper.traverse((child) => {
+              rawModel.traverse((child) => {
                 if (child.isMesh) {
                   child.castShadow = true;
                   child.receiveShadow = true;
@@ -604,6 +713,22 @@
                   }
                 }
               });
+
+              const box = new THREE.Box3().setFromObject(rawModel);
+              const size = box.getSize(new THREE.Vector3());
+              const center = box.getCenter(new THREE.Vector3());
+              const wrapper = new THREE.Group();
+              wrapper.add(rawModel);
+              const bottomY = box.min.y;
+              rawModel.position.set(-center.x, -bottomY, -center.z);
+
+              const maxDim = Math.max(size.x, size.y, size.z);
+              if (maxDim > 0) {
+                const targetSize = 1.5;
+                const scaleFactor = targetSize / maxDim;
+                wrapper.scale.set(scaleFactor, scaleFactor, scaleFactor);
+              }
+
               this.loadedModels[path] = wrapper;
               this.loadingStatus[path] = "loaded";
               if (this.waitingCallbacks[path]) {
@@ -642,46 +767,96 @@
           }
 
           const tex = new THREE.CanvasTexture(cvs);
-          tex.magFilter = THREE.NearestFilter; // Retro pixel look
+          tex.magFilter = THREE.NearestFilter;
           this.textures[key] = tex;
           return tex;
         },
 
-        createSpriteObstaclePrototype: function (levelConfig) {
-          const data = levelConfig.assets.obstacle;
-          const geo = new THREE.PlaneGeometry(data.width, data.height);
-          let tex;
-          if (data.texture.includes("_placeholder")) {
-            tex = this.createDummyTexture(data.texture, null, "sprite");
-          } else {
-            tex = this.textureLoader.load(data.texture);
-            tex.magFilter = THREE.NearestFilter;
-          }
-          const mat = new THREE.MeshStandardMaterial({
-            map: tex,
+        createPlayer: function (levelConfig) {
+          const pGroup = new THREE.Group();
+          const pData = levelConfig.assets.player;
+          const geometry = new THREE.PlaneGeometry(pData.width, pData.height);
+          const fallbackMap = this.createDummyTexture(
+            levelConfig.name,
+            levelConfig.colors.uiPrimary,
+            "default"
+          );
+
+          const texture = this.textureLoader.load(
+            pData.texture,
+            undefined,
+            undefined,
+            () => {
+              mesh.material.map = fallbackMap;
+            }
+          );
+          texture.magFilter = THREE.NearestFilter;
+
+          const material = new THREE.MeshStandardMaterial({
+            map: texture,
             transparent: true,
-            alphaTest: 0.5,
+            alphaTest: 0.3,
             side: THREE.DoubleSide,
+            roughness: 0.4,
           });
-          const mesh = new THREE.Mesh(geo, mat);
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.y = pData.height / 2;
           mesh.castShadow = true;
-          mesh.userData.isObstacle = true;
-          return mesh;
+          pGroup.add(mesh);
+          return pGroup;
         },
 
-        createGeoObstaclePrototype: function (levelConfig) {
-          const oData = levelConfig.assets.obstacle;
-          let geo =
-            oData.type === "cylinder"
-              ? new THREE.CylinderGeometry(0.8, 0.8, 1.5, 12)
-              : new THREE.BoxGeometry(1.5, 1.5, 1.5);
-          const mat = new THREE.MeshStandardMaterial({
-            color: oData.color,
-            emissive: oData.emissive || 0x000000,
-          });
-          const mesh = new THREE.Mesh(geo, mat);
-          mesh.castShadow = true;
-          return mesh;
+        createTerrainTexture: function (levelConfig) {
+          const key = "terrain_" + levelConfig.name;
+          if (this.textures[key]) return this.textures[key];
+          const canvas = document.createElement("canvas");
+          canvas.width = 512;
+          canvas.height = 512;
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = levelConfig.colors.terrain;
+          ctx.fillRect(0, 0, 512, 512);
+          ctx.fillStyle = "rgba(0,0,0,0.1)";
+          for (let i = 0; i < 400; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const s = 2 + Math.random() * 5;
+            ctx.fillRect(x, y, s, s);
+          }
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          texture.repeat.set(20, 20);
+          texture.magFilter = THREE.NearestFilter;
+          this.textures[key] = texture;
+          return texture;
+        },
+
+        createRoadTexture: function (levelConfig) {
+          const key = "road_" + levelConfig.name;
+          if (this.textures[key]) return this.textures[key];
+          const canvas = document.createElement("canvas");
+          canvas.width = 512;
+          canvas.height = 512;
+          const ctx = canvas.getContext("2d");
+          const c = levelConfig.colors;
+          ctx.fillStyle = c.road;
+          ctx.fillRect(0, 0, 512, 512);
+          ctx.fillStyle = c.roadStripes;
+          ctx.globalAlpha = 0.5;
+          const lanePx = 512 / GAME_PARAMS.physics.lanesCount;
+          for (let i = 1; i < GAME_PARAMS.physics.lanesCount; i++)
+            ctx.fillRect(i * lanePx - 2, 0, 4, 512);
+          ctx.globalAlpha = 1.0;
+          ctx.fillRect(0, 0, 10, 512);
+          ctx.fillRect(502, 0, 10, 512);
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          texture.repeat.set(1, GAME_PARAMS.road.textureRepeats);
+          texture.magFilter = THREE.NearestFilter;
+          this.textures[key] = texture;
+          return texture;
         },
 
         // --- PALM TREE ---
@@ -1101,142 +1276,40 @@
           return group;
         },
 
-        spawnObstacle: function (levelConfig) {
-          if (this.prototypes.obstacle) return this.prototypes.obstacle.clone();
-          return new THREE.Mesh(
-            new THREE.BoxGeometry(1, 1, 1),
-            new THREE.MeshBasicMaterial({ color: 0xff0000 })
-          );
-        },
-
-        spawnCoin: function (levelConfig) {
-          const group = new THREE.Group();
-          const cData = levelConfig.assets.coin;
-
-          // Optimization: If loaded, skip fallback creation logic
-          if (cData.model && this.loadedModels[cData.model]) {
-            group.add(this.loadedModels[cData.model].clone());
-            return group;
-          }
-
-          // Fallback while loading or if no model
-          let geo;
-          if (cData.type === "torus")
-            geo = new THREE.TorusGeometry(0.3, 0.1, 8, 16);
-          else geo = new THREE.OctahedronGeometry(0.5, 0);
+        createGeoObstaclePrototype: function (levelConfig) {
+          const oData = levelConfig.assets.obstacle;
+          let geo =
+            oData.type === "cylinder"
+              ? new THREE.CylinderGeometry(0.8, 0.8, 1.5, 12)
+              : new THREE.BoxGeometry(1.5, 1.5, 1.5);
           const mat = new THREE.MeshStandardMaterial({
-            color: cData.color || 0xffd700,
-            emissive: cData.color || 0xffd700,
-            emissiveIntensity: 0.6,
+            color: oData.color,
+            emissive: oData.emissive || 0x000000,
           });
-          const fallback = new THREE.Mesh(geo, mat);
-
-          if (cData.model) {
-            fallback.name = "fallback_mesh";
-            group.add(fallback);
-            this.loadGLB(cData.model, (loadedModel) => {
-              const old = group.getObjectByName("fallback_mesh");
-              if (old) group.remove(old);
-              group.add(loadedModel.clone());
-            });
-          } else {
-            group.add(fallback);
-          }
-          return group;
-        },
-
-        createPlayer: function (levelConfig) {
-          const pGroup = new THREE.Group();
-          const pData = levelConfig.assets.player;
-          const geometry = new THREE.PlaneGeometry(pData.width, pData.height);
-          const fallbackMap = this.createDummyTexture(
-            levelConfig.name,
-            levelConfig.colors.uiPrimary,
-            "default"
-          );
-
-          const texture = this.textureLoader.load(
-            pData.texture,
-            undefined,
-            undefined,
-            () => {
-              mesh.material.map = fallbackMap;
-            }
-          );
-          texture.magFilter = THREE.NearestFilter; // Pixelated Player
-
-          const material = new THREE.MeshStandardMaterial({
-            map: texture,
-            transparent: true,
-            alphaTest: 0.3,
-            side: THREE.DoubleSide,
-            roughness: 0.4,
-          });
-
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.position.y = pData.height / 2;
+          const mesh = new THREE.Mesh(geo, mat);
           mesh.castShadow = true;
-          pGroup.add(mesh);
-          return pGroup;
+          return mesh;
         },
-
-        // --- OPTIMIZATION: CACHED TEXTURES ---
-        createTerrainTexture: function (levelConfig) {
-          const key = "terrain_" + levelConfig.name;
-          if (this.textures[key]) return this.textures[key];
-
-          const canvas = document.createElement("canvas");
-          canvas.width = 512;
-          canvas.height = 512;
-          const ctx = canvas.getContext("2d");
-
-          ctx.fillStyle = levelConfig.colors.terrain;
-          ctx.fillRect(0, 0, 512, 512);
-
-          ctx.fillStyle = "rgba(0,0,0,0.1)";
-          for (let i = 0; i < 400; i++) {
-            const x = Math.random() * 512;
-            const y = Math.random() * 512;
-            const s = 2 + Math.random() * 5;
-            ctx.fillRect(x, y, s, s);
+        createSpriteObstaclePrototype: function (levelConfig) {
+          const data = levelConfig.assets.obstacle;
+          const geo = new THREE.PlaneGeometry(data.width, data.height);
+          let tex;
+          if (data.texture.includes("_placeholder")) {
+            tex = this.createDummyTexture(data.texture, null, "sprite");
+          } else {
+            tex = this.textureLoader.load(data.texture);
+            tex.magFilter = THREE.NearestFilter;
           }
-          const texture = new THREE.CanvasTexture(canvas);
-          texture.wrapS = THREE.RepeatWrapping;
-          texture.wrapT = THREE.RepeatWrapping;
-          texture.repeat.set(20, 20);
-          texture.magFilter = THREE.NearestFilter;
-
-          this.textures[key] = texture;
-          return texture;
-        },
-
-        createRoadTexture: function (levelConfig) {
-          const key = "road_" + levelConfig.name;
-          if (this.textures[key]) return this.textures[key];
-
-          const canvas = document.createElement("canvas");
-          canvas.width = 512;
-          canvas.height = 512;
-          const ctx = canvas.getContext("2d");
-          const c = levelConfig.colors;
-          ctx.fillStyle = c.road;
-          ctx.fillRect(0, 0, 512, 512);
-          ctx.fillStyle = c.roadStripes;
-          ctx.globalAlpha = 0.5;
-          const lanePx = 512 / GAME_PARAMS.physics.lanesCount;
-          for (let i = 1; i < GAME_PARAMS.physics.lanesCount; i++)
-            ctx.fillRect(i * lanePx - 2, 0, 4, 512);
-          ctx.globalAlpha = 1.0;
-          ctx.fillRect(0, 0, 10, 512);
-          ctx.fillRect(502, 0, 10, 512);
-          const texture = new THREE.CanvasTexture(canvas);
-          texture.wrapS = THREE.RepeatWrapping;
-          texture.wrapT = THREE.RepeatWrapping;
-          texture.repeat.set(1, GAME_PARAMS.road.textureRepeats);
-          texture.magFilter = THREE.NearestFilter;
-
-          this.textures[key] = texture;
-          return texture;
+          const mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            transparent: true,
+            alphaTest: 0.5,
+            side: THREE.DoubleSide,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.castShadow = true;
+          mesh.userData.isObstacle = true;
+          return mesh;
         },
       };
 
@@ -1275,7 +1348,7 @@
         );
       }
 
-      // --- OPTIMIZATION: HELPER TO CLEAN MEMORY ---
+      // ---  HELPER TO CLEAN MEMORY ---
       function dispose3DObject(obj) {
         if (!obj) return;
         scene.remove(obj);
@@ -1283,9 +1356,13 @@
           if (child.isMesh) {
             if (child.geometry) child.geometry.dispose();
             if (child.material) {
-              if (Array.isArray(child.material))
-                child.material.forEach((m) => m.dispose());
-              else child.material.dispose();
+              const mats = Array.isArray(child.material)
+                ? child.material
+                : [child.material];
+              mats.forEach((m) => {
+                if (m.map) m.map.dispose();
+                m.dispose();
+              });
             }
           }
         });
@@ -1316,11 +1393,10 @@
         const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambLight);
 
-        // Optimized Shadow Camera
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(20, 50, 20);
         dirLight.castShadow = true;
-        dirLight.shadow.mapSize.width = 1024; // Lower res for efficiency
+        dirLight.shadow.mapSize.width = 1024;
         dirLight.shadow.mapSize.height = 1024;
         dirLight.shadow.camera.left = -20;
         dirLight.shadow.camera.right = 20;
@@ -1352,19 +1428,16 @@
         ui.title.innerText = activeLevel.name;
         ui.title.style.color = activeLevel.colors.uiPrimary;
 
-        AssetFactory.initLevelAssets(activeLevel);
+        AssetFactory.clearPools();
 
-        // CLEANUP OLD SCENE
         dispose3DObject(player);
         dispose3DObject(roadMesh);
         dispose3DObject(terrainMesh);
-
-        obstacles.forEach((o) => dispose3DObject(o));
         obstacles = [];
-        coins.forEach((c) => dispose3DObject(c));
         coins = [];
-        buildings.forEach((b) => dispose3DObject(b));
         buildings = [];
+
+        AssetFactory.initLevelAssets(activeLevel);
 
         scene.background = new THREE.Color(activeLevel.colors.background);
         scene.fog = new THREE.Fog(activeLevel.colors.fog, 20, 90);
@@ -1415,12 +1488,9 @@
         player.position.x = targetX;
         player.rotation.set(0, 0, 0);
 
-        // Cleanup objects before start
-        obstacles.forEach((o) => dispose3DObject(o));
+        AssetFactory.resetPools();
         obstacles = [];
-        coins.forEach((c) => dispose3DObject(c));
         coins = [];
-        buildings.forEach((b) => dispose3DObject(b));
         buildings = [];
 
         ui.start.classList.add("hidden");
@@ -1472,6 +1542,8 @@
 
       function update() {
         if (!isRunning) return;
+
+        // 1. Physics & Environment
         speed += GAME_PARAMS.physics.acceleration;
         if (speed > GAME_PARAMS.physics.maxSpeed)
           speed = GAME_PARAMS.physics.maxSpeed;
@@ -1488,54 +1560,64 @@
         const maxLane = Math.floor(GAME_PARAMS.physics.lanesCount / 2);
 
         if (Math.random() < GAME_PARAMS.spawning.obstacleRate) {
-          const obs = AssetFactory.spawnObstacle(activeLevel);
+          const obs = AssetFactory.getObstacle(activeLevel);
           const laneIdx =
             Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
             maxLane;
+
+          // Reset Position
           obs.position.set(
             getLaneX(laneIdx),
             obs.userData.isObstacle ? 1.5 : 0.75,
             -80
           );
-          scene.add(obs);
-          obstacles.push(obs);
+
+          if (!obstacles.includes(obs)) obstacles.push(obs);
         }
+
         if (Math.random() < GAME_PARAMS.spawning.coinRate) {
-          const c = AssetFactory.spawnCoin(activeLevel);
+          const c = AssetFactory.getCoin(activeLevel);
           const laneIdx =
             Math.floor(Math.random() * GAME_PARAMS.physics.lanesCount) -
             maxLane;
           c.position.set(getLaneX(laneIdx), 1.0, -80);
-          scene.add(c);
-          coins.push(c);
+          c.rotation.set(0, 0, 0); // Reset rotation
+          if (!coins.includes(c)) coins.push(c);
         }
 
         if (Math.random() < GAME_PARAMS.spawning.buildingRate) {
-          const b = AssetFactory.spawnBuilding(activeLevel);
+          const b = AssetFactory.getBuilding(activeLevel);
           const side = Math.random() > 0.5 ? 1 : -1;
           const dist =
             GAME_PARAMS.physics.laneWidth / 2 + 5 + Math.random() * 5;
           b.position.set(side * dist, 0, -90);
           b.rotation.y = Math.random() * Math.PI * 2;
-          scene.add(b);
-          buildings.push(b);
+          if (!buildings.includes(b)) buildings.push(b);
         }
 
         const moveObj = (arr, type) => {
           for (let i = arr.length - 1; i >= 0; i--) {
             const obj = arr[i];
+
+            if (!obj.visible) {
+              arr.splice(i, 1);
+              continue;
+            }
+
             obj.position.z += speed;
             if (type === "coin") obj.rotation.y += 0.05;
 
             if (obj.position.z > -1.5 && obj.position.z < 1.5) {
               const dist = Math.abs(obj.position.x - player.position.x);
-              if (type === "obstacle" && dist < 1.2) stopGame("crash");
-              else if (type === "coin" && dist < 1.2) {
-                scene.remove(obj);
+
+              if (type === "obstacle" && dist < 1.2) {
+                stopGame("crash");
+              } else if (type === "coin" && dist < 1.2) {
+                AssetFactory.recycle(obj);
                 arr.splice(i, 1);
+
                 SoundFactory.play("coin");
                 score += activeLevel.gameplay.coinValue;
-
                 score = Math.round(score * 10) / 10;
 
                 ui.score.innerText = `${activeLevel.gameplay.scoremessage} ${score} / ${activeLevel.gameplay.winScore}`;
@@ -1546,12 +1628,14 @@
                 continue;
               }
             }
+
             if (obj.position.z > 20) {
-              scene.remove(obj);
+              AssetFactory.recycle(obj);
               arr.splice(i, 1);
             }
           }
         };
+
         moveObj(obstacles, "obstacle");
         moveObj(coins, "coin");
         moveObj(buildings, "building");
